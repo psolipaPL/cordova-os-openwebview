@@ -14,7 +14,7 @@ data class OpenWebviewInputArguments(
     @SerializedName("leftToRight") val leftToRight: Boolean?,
     @SerializedName("showNavigationButtons") val showNavigationButtons: Boolean?,
     @SerializedName("customWebViewUserAgent") val customWebViewUserAgent: String?,
-    @SerializedName("android") val android: OpenWebviewAndroidOptions
+    @SerializedName("android") val android: OpenWebviewAndroidOptions?
 )
 
 data class OpenWebviewAndroidOptions(
