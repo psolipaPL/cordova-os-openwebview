@@ -51,9 +51,6 @@ class OpenWebview : CordovaPlugin() {
         val webViewOptions: OSIABWebViewOptions?
         var customHeaders: Map<String, String>? = null
 
-        var deeplinkScheme: String? = null
-        var deeplinkReplace: String? = null
-
         try {
             val arguments = args.getJSONObject(0)
 
@@ -75,13 +72,6 @@ class OpenWebview : CordovaPlugin() {
                 }
             }
 
-            if (arguments.has("deeplinkScheme")) {
-                deeplinkScheme = arguments.getString("deeplinkScheme")
-            }
-            if (arguments.has("deeplinkReplace")) {
-                deeplinkReplace = arguments.getString("deeplinkReplace")
-            }
-
         } catch (e: Exception) {
             sendError(callbackContext, OpenWebviewError.InputArgumentsIssue)
             return
@@ -100,25 +90,16 @@ class OpenWebview : CordovaPlugin() {
                 val onNavCompletedCb: (Any?) -> Unit = { data: Any? ->
                     val navigatedUrl: String? = extractUrlFromNavigationData(data)
 
-                    val isDeepLink: Boolean =
-                        !deeplinkScheme.isNullOrEmpty() &&
-                        !navigatedUrl.isNullOrEmpty() &&
-                        navigatedUrl!!.startsWith(deeplinkScheme!!)
+                    val converted: String? = convertDeepLink(navigatedUrl)
 
-                    if (isDeepLink) {
-                        val finalUrl: String? = convertDeepLink(
-                            original = navigatedUrl,
-                            deeplinkScheme = deeplinkScheme,
-                            deeplinkReplace = deeplinkReplace
-                        )
-
+                    if (converted != null) {
                         (activeRouter as? OSIABClosable)?.close { _: Boolean ->
                             activeRouter = null
 
                             sendSuccess(
                                 callbackContext,
                                 OpenWebviewEventType.NAVIGATION_COMPLETED,
-                                finalUrl
+                                converted
                             )
                         }
                     } else {
@@ -239,31 +220,17 @@ class OpenWebview : CordovaPlugin() {
         }
     }
 
-    private fun convertDeepLink(
-        original: String?,
-        deeplinkScheme: String?,
-        deeplinkReplace: String?
-    ): String? {
-
-        if (original.isNullOrEmpty()
-            || deeplinkScheme.isNullOrEmpty()
-            || deeplinkReplace.isNullOrEmpty()
-        ) {
-            return original
+    private fun convertDeepLink(original: String?): String? {
+        if (original.isNullOrEmpty()) {
+            return null
         }
 
-        return if (original.startsWith(deeplinkScheme)) {
-            val rest = original.substring(deeplinkScheme.length)
+        val regex = Regex("^([a-zA-Z0-9+.-]+)://(.+?)/Android/(.*)$")
+        val match = regex.find(original) ?: return null
 
-            if (deeplinkReplace.endsWith("/") && rest.startsWith("/")) {
-                deeplinkReplace + rest.drop(1)
-            } else if (!deeplinkReplace.endsWith("/") && !rest.startsWith("/")) {
-                "$deeplinkReplace/$rest"
-            } else {
-                deeplinkReplace + rest
-            }
-        } else {
-            original
-        }
+        val appBase = match.groupValues[2]
+        val rest = match.groupValues[3]
+
+        return "https://$appBase/$rest"
     }
 }
