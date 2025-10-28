@@ -1,5 +1,6 @@
 package com.outsystems.plugins.openwebview
 
+import android.webkit.WebView
 import com.google.gson.Gson
 import androidx.lifecycle.lifecycleScope
 import com.outsystems.plugins.inappbrowser.osinappbrowserlib.OSIABEngine
@@ -14,6 +15,7 @@ import org.apache.cordova.CordovaInterface
 import org.apache.cordova.CordovaPlugin
 import org.apache.cordova.CordovaWebView
 import org.apache.cordova.PluginResult
+import org.apache.cordova.engine.SystemWebViewEngine
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -28,7 +30,21 @@ class OpenWebview : CordovaPlugin() {
     override fun initialize(cordova: CordovaInterface, webView: CordovaWebView) {
         super.initialize(cordova, webView)
         this.engine = OSIABEngine()
-        this.defaultUserAgent = webView.view.settings.userAgentString
+
+        defaultUserAgent = try {
+            val eng = webView.engine
+            if (eng is SystemWebViewEngine) {
+                eng.view.settings.userAgentString
+            } else {
+                WebView(cordova.context).settings.userAgentString
+            }
+        } catch (t: Throwable) {
+            try {
+                WebView(cordova.context).settings.userAgentString
+            } catch (t2: Throwable) {
+                null
+            }
+        }
     }
 
     override fun execute(
