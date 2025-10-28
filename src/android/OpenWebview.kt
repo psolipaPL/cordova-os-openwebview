@@ -100,47 +100,44 @@ class OpenWebview : CordovaPlugin() {
 
         try {
             close { _: Boolean ->
-                val onPageLoadedCb: () -> Unit = {
-                    sendSuccess(callbackContext, OpenWebviewEventType.PAGE_LOADED)
-                }
-
-                val onFinishedCb: () -> Unit = {
-                    sendSuccess(callbackContext, OpenWebviewEventType.FINISHED)
-                }
-
-                val onNavCompletedCb: (Any?) -> Unit = { data: Any? ->
-                    val navigatedUrl: String? = extractUrlFromNavigationData(data)
-
-                    val converted: String? = convertDeepLink(navigatedUrl)
-
-                    if (converted != null) {
-                        (activeRouter as? OSIABClosable)?.close { _: Boolean ->
-                            activeRouter = null
-
-                            sendSuccess(
-                                callbackContext,
-                                OpenWebviewEventType.NAVIGATION_COMPLETED,
-                                converted
-                            )
-                        }
-                    } else {
-                        sendSuccess(
-                            callbackContext,
-                            OpenWebviewEventType.NAVIGATION_COMPLETED,
-                            data
-                        )
-                    }
-                }
-
                 val router = OSIABWebViewRouterAdapter(
                     context = cordova.context,
                     lifecycleScope = cordova.activity.lifecycleScope,
                     options = webViewOptions,
                     customHeaders = customHeaders,
                     flowHelper = OSIABFlowHelper(),
-                    onBrowserPageLoaded = onPageLoadedCb,
-                    onBrowserFinished = onFinishedCb,
-                    onBrowserPageNavigationCompleted = onNavCompletedCb
+                    onBrowserPageLoaded = {
+                        sendSuccess(callbackContext, OpenWebviewEventType.PAGE_LOADED)
+                    },
+                    onBrowserFinished = {
+                        sendSuccess(callbackContext, OpenWebviewEventType.FINISHED)
+                    },
+                    onBrowserPageNavigationCompleted = { data ->
+                        val navigatedUrl = extractUrlFromNavigationData(data)
+                        val converted = convertDeepLink(navigatedUrl)
+
+                        if (converted != null) {
+                            // Caso especial: deep link <identifier>://.../Android/... convertido
+                            // para https://<url_da_app>/<resto>
+                            sendSuccess(
+                                callbackContext,
+                                OpenWebviewEventType.NAVIGATION_COMPLETED,
+                                converted
+                            )
+                        } else {
+                            // Navegação normal, devolvemos o que recebemos
+                            sendSuccess(
+                                callbackContext,
+                                OpenWebviewEventType.NAVIGATION_COMPLETED,
+                                data
+                            )
+                        }
+
+                        // IMPORTANTE:
+                        // Já NÃO fechamos a WebView aqui.
+                        // O fecho vai ser pedido pelo JS chamando cordova.plugins.openWebview.close()
+                        // depois de tratar este evento. Isto evita o crash.
+                    }
                 )
 
                 engine?.openWebView(router, url) { success: Boolean ->
@@ -254,6 +251,8 @@ class OpenWebview : CordovaPlugin() {
             return null
         }
 
+        // <identifier>://<url_da_app>/Android/<resto>
+        // -> https://<url_da_app>/<resto>
         val regex = Regex("^([a-zA-Z0-9+.-]+)://(.+?)/Android/(.*)$")
         val match = regex.find(original) ?: return null
 
