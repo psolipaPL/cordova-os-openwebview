@@ -1,10 +1,12 @@
 package com.outsystems.plugins.openwebview
 
+import android.webkit.CookieManager
+import android.webkit.WebSettings
 import android.webkit.WebView
-import com.google.gson.Gson
 import androidx.lifecycle.lifecycleScope
-import com.outsystems.plugins.inappbrowser.osinappbrowserlib.OSIABEngine
+import com.google.gson.Gson
 import com.outsystems.plugins.inappbrowser.osinappbrowserlib.OSIABClosable
+import com.outsystems.plugins.inappbrowser.osinappbrowserlib.OSIABEngine
 import com.outsystems.plugins.inappbrowser.osinappbrowserlib.OSIABRouter
 import com.outsystems.plugins.inappbrowser.osinappbrowserlib.helpers.OSIABFlowHelper
 import com.outsystems.plugins.inappbrowser.osinappbrowserlib.models.OSIABToolbarPosition
@@ -33,18 +35,26 @@ class OpenWebview : CordovaPlugin() {
 
         defaultUserAgent = try {
             val eng = webView.engine
-            if (eng is SystemWebViewEngine) {
+            val uaFromCordova = if (eng is SystemWebViewEngine) {
                 val wv = eng.view as? WebView
-                wv?.settings?.userAgentString
-                    ?: WebView(cordova.context).settings.userAgentString
-            } else {
-                WebView(cordova.context).settings.userAgentString
-            }
+                try {
+                    wv?.getSettings()?.getUserAgentString()
+                } catch (t: Throwable) {
+                    null
+                }
+            } else null
+
+            uaFromCordova
+                ?: try {
+                    WebSettings.getDefaultUserAgent(cordova.context)
+                } catch (t: Throwable) {
+                    System.getProperty("http.agent")
+                }
         } catch (t: Throwable) {
             try {
-                WebView(cordova.context).settings.userAgentString
+                WebSettings.getDefaultUserAgent(cordova.context)
             } catch (t2: Throwable) {
-                null
+                System.getProperty("http.agent")
             }
         }
     }
@@ -70,7 +80,7 @@ class OpenWebview : CordovaPlugin() {
     private fun open(args: JSONArray, callbackContext: CallbackContext) {
         val url: String?
         val webViewOptions: OSIABWebViewOptions?
-        var customHeaders: Map<String, String>? = null
+        var jsProvidedHeaders: Map<String, String>? = null
 
         try {
             val arguments = args.getJSONObject(0)
@@ -81,7 +91,7 @@ class OpenWebview : CordovaPlugin() {
             webViewOptions = buildWebViewOptions(arguments.optString("options", "{}"))
 
             if (arguments.has("customHeaders")) {
-                customHeaders = arguments.getJSONObject("customHeaders").let { jsObject ->
+                jsProvidedHeaders = arguments.getJSONObject("customHeaders").let { jsObject ->
                     val result = mutableMapOf<String, String>()
                     jsObject.keys().forEach { key ->
                         when (val value = jsObject.opt(key)) {
@@ -100,11 +110,26 @@ class OpenWebview : CordovaPlugin() {
 
         try {
             close { _: Boolean ->
+                val finalHeaders = mutableMapOf<String, String>()
+                jsProvidedHeaders?.forEach { (k, v) ->
+                    finalHeaders[k] = v
+                }
+
+                try {
+                    if (!url.isNullOrEmpty()) {
+                        val cookieString = CookieManager.getInstance().getCookie(url)
+                        if (!cookieString.isNullOrEmpty()) {
+                            finalHeaders["Cookie"] = cookieString
+                        }
+                    }
+                } catch (_: Throwable) {
+                }
+
                 val router = OSIABWebViewRouterAdapter(
                     context = cordova.context,
                     lifecycleScope = cordova.activity.lifecycleScope,
                     options = webViewOptions,
-                    customHeaders = customHeaders,
+                    customHeaders = finalHeaders,
                     flowHelper = OSIABFlowHelper(),
                     onBrowserPageLoaded = {
                         sendSuccess(callbackContext, OpenWebviewEventType.PAGE_LOADED)
@@ -117,15 +142,12 @@ class OpenWebview : CordovaPlugin() {
                         val converted = convertDeepLink(navigatedUrl)
 
                         if (converted != null) {
-                            // Caso especial: deep link <identifier>://.../Android/... convertido
-                            // para https://<url_da_app>/<resto>
                             sendSuccess(
                                 callbackContext,
                                 OpenWebviewEventType.NAVIGATION_COMPLETED,
                                 converted
                             )
                         } else {
-                            // Navegação normal, devolvemos o que recebemos
                             sendSuccess(
                                 callbackContext,
                                 OpenWebviewEventType.NAVIGATION_COMPLETED,
@@ -133,10 +155,8 @@ class OpenWebview : CordovaPlugin() {
                             )
                         }
 
-                        // IMPORTANTE:
-                        // Já NÃO fechamos a WebView aqui.
-                        // O fecho vai ser pedido pelo JS chamando cordova.plugins.openWebview.close()
-                        // depois de tratar este evento. Isto evita o crash.
+                        // Nota: NÃO fechamos a WebView aqui.
+                        // O JS é que decide quando chamar close()
                     }
                 )
 
@@ -145,7 +165,7 @@ class OpenWebview : CordovaPlugin() {
                         activeRouter = router
                         sendSuccess(callbackContext, OpenWebviewEventType.SUCCESS)
                     } else {
-                        sendError(callbackContext, OpenWebviewError.OpenFailed(url))
+                        sendError(callbackContext, OpenWebviewError.OpenFailed(url ?: ""))
                     }
                 }
             }
@@ -250,9 +270,7 @@ class OpenWebview : CordovaPlugin() {
         if (original.isNullOrEmpty()) {
             return null
         }
-
-        // <identifier>://<url_da_app>/Android/<resto>
-        // -> https://<url_da_app>/<resto>
+        
         val regex = Regex("^([a-zA-Z0-9+.-]+)://(.+?)/Android/(.*)$")
         val match = regex.find(original) ?: return null
 
