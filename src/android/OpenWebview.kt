@@ -9,7 +9,11 @@ import com.outsystems.plugins.inappbrowser.osinappbrowserlib.helpers.OSIABFlowHe
 import com.outsystems.plugins.inappbrowser.osinappbrowserlib.models.OSIABToolbarPosition
 import com.outsystems.plugins.inappbrowser.osinappbrowserlib.models.OSIABWebViewOptions
 import com.outsystems.plugins.inappbrowser.osinappbrowserlib.routeradapters.OSIABWebViewRouterAdapter
-import org.apache.cordova.*
+import org.apache.cordova.CallbackContext
+import org.apache.cordova.CordovaInterface
+import org.apache.cordova.CordovaPlugin
+import org.apache.cordova.CordovaWebView
+import org.apache.cordova.PluginResult
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -84,21 +88,182 @@ class OpenWebview : CordovaPlugin() {
         }
 
         try {
-            close {
+            close { _: Boolean ->
+                val onPageLoadedCb: () -> Unit = {
+                    sendSuccess(callbackContext, OpenWebviewEventType.PAGE_LOADED)
+                }
+
+                val onFinishedCb: () -> Unit = {
+                    sendSuccess(callbackContext, OpenWebviewEventType.FINISHED)
+                }
+
+                val onNavCompletedCb: (Any?) -> Unit = { data: Any? ->
+                    val navigatedUrl: String? = extractUrlFromNavigationData(data)
+
+                    val isDeepLink: Boolean =
+                        !deeplinkScheme.isNullOrEmpty() &&
+                        !navigatedUrl.isNullOrEmpty() &&
+                        navigatedUrl!!.startsWith(deeplinkScheme!!)
+
+                    if (isDeepLink) {
+                        val finalUrl: String? = convertDeepLink(
+                            original = navigatedUrl,
+                            deeplinkScheme = deeplinkScheme,
+                            deeplinkReplace = deeplinkReplace
+                        )
+
+                        (activeRouter as? OSIABClosable)?.close { _: Boolean ->
+                            activeRouter = null
+
+                            sendSuccess(
+                                callbackContext,
+                                OpenWebviewEventType.NAVIGATION_COMPLETED,
+                                finalUrl
+                            )
+                        }
+                    } else {
+                        sendSuccess(
+                            callbackContext,
+                            OpenWebviewEventType.NAVIGATION_COMPLETED,
+                            data
+                        )
+                    }
+                }
+
                 val router = OSIABWebViewRouterAdapter(
                     context = cordova.context,
                     lifecycleScope = cordova.activity.lifecycleScope,
                     options = webViewOptions,
                     customHeaders = customHeaders,
                     flowHelper = OSIABFlowHelper(),
+                    onBrowserPageLoaded = onPageLoadedCb,
+                    onBrowserFinished = onFinishedCb,
+                    onBrowserPageNavigationCompleted = onNavCompletedCb
+                )
 
-                    onBrowserPageLoaded = {
-                        sendSuccess(callbackContext, OpenWebviewEventType.PAGE_LOADED)
-                    },
+                engine?.openWebView(router, url) { success: Boolean ->
+                    if (success) {
+                        activeRouter = router
+                        sendSuccess(callbackContext, OpenWebviewEventType.SUCCESS)
+                    } else {
+                        sendError(callbackContext, OpenWebviewError.OpenFailed(url))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            sendError(callbackContext, OpenWebviewError.OpenFailed(url ?: ""))
+        }
+    }
 
-                    onBrowserFinished = {
-                        sendSuccess(callbackContext, OpenWebviewEventType.FINISHED)
-                    },
+    private fun close(callbackContext: CallbackContext) {
+        close { success: Boolean ->
+            if (success) {
+                sendSuccess(callbackContext, OpenWebviewEventType.SUCCESS)
+            } else {
+                sendError(callbackContext, OpenWebviewError.CloseFailed)
+            }
+        }
+    }
 
-                    onBrowserPageNavigationCompleted = { data ->
-                        val navigatedUrl = extractUrlFromNavigationData(data)
+    private fun close(callback: (Boolean) -> Unit) {
+        (activeRouter as? OSIABClosable)?.let { closableRouter ->
+            closableRouter.close { success: Boolean ->
+                if (success) {
+                    activeRouter = null
+                }
+                callback(success)
+            }
+        } ?: callback(false)
+    }
+
+    private fun buildWebViewOptions(options: String): OSIABWebViewOptions {
+        return gson.fromJson(options, OpenWebviewInputArguments::class.java).let {
+            OSIABWebViewOptions(
+                it.showURL ?: true,
+                it.showToolbar ?: true,
+                it.clearCache ?: true,
+                it.clearSessionCache ?: true,
+                it.mediaPlaybackRequiresUserAction ?: false,
+                it.closeButtonText ?: "Close",
+                it.toolbarPosition ?: OSIABToolbarPosition.TOP,
+                it.leftToRight ?: false,
+                it.showNavigationButtons ?: true,
+                it.android.allowZoom ?: true,
+                it.android.hardwareBack ?: true,
+                it.android.pauseMedia ?: true,
+                it.customWebViewUserAgent
+            )
+        }
+    }
+
+    private fun sendSuccess(
+        callbackContext: CallbackContext,
+        eventType: OpenWebviewEventType,
+        data: Any? = null
+    ) {
+        val payload: Map<String, Any?> = mapOf(
+            "eventType" to eventType.value,
+            "data" to data
+        )
+        val jsonString = gson.toJson(payload)
+
+        val pluginResult = PluginResult(PluginResult.Status.OK, jsonString)
+        pluginResult.keepCallback = true
+        callbackContext.sendPluginResult(pluginResult)
+    }
+
+    private fun sendError(callbackContext: CallbackContext, error: OpenWebviewError) {
+        val jsonError = JSONObject().apply {
+            put("code", error.code)
+            put("message", error.message)
+        }
+
+        val pluginResult = PluginResult(
+            PluginResult.Status.ERROR,
+            jsonError
+        )
+        callbackContext.sendPluginResult(pluginResult)
+    }
+
+    private fun extractUrlFromNavigationData(data: Any?): String? {
+        return when (data) {
+            is String -> data
+            is Map<*, *> -> {
+                val raw = data["url"]
+                if (raw is String) raw else null
+            }
+            is JSONObject -> {
+                data.optString("url", null)
+            }
+            else -> null
+        }
+    }
+
+    private fun convertDeepLink(
+        original: String?,
+        deeplinkScheme: String?,
+        deeplinkReplace: String?
+    ): String? {
+
+        if (original.isNullOrEmpty()
+            || deeplinkScheme.isNullOrEmpty()
+            || deeplinkReplace.isNullOrEmpty()
+        ) {
+            return original
+        }
+
+        return if (original.startsWith(deeplinkScheme)) {
+            val rest = original.substring(deeplinkScheme.length)
+
+            if (deeplinkReplace.endsWith("/") && rest.startsWith("/")) {
+                deeplinkReplace + rest.drop(1)
+            } else if (!deeplinkReplace.endsWith("/") && !rest.startsWith("/")) {
+                "$deeplinkReplace/$rest"
+            } else {
+                deeplinkReplace + rest
+            }
+        } else {
+            original
+        }
+    }
+}
