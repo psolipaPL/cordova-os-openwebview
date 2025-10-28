@@ -34,7 +34,9 @@ class OpenWebview : CordovaPlugin() {
         defaultUserAgent = try {
             val eng = webView.engine
             if (eng is SystemWebViewEngine) {
-                eng.view.settings.userAgentString
+                val wv = eng.view as? WebView
+                wv?.settings?.userAgentString
+                    ?: WebView(cordova.context).settings.userAgentString
             } else {
                 WebView(cordova.context).settings.userAgentString
             }
@@ -52,17 +54,17 @@ class OpenWebview : CordovaPlugin() {
         args: JSONArray,
         callbackContext: CallbackContext
     ): Boolean {
-        when (action) {
+        return when (action) {
             "open" -> {
                 open(args, callbackContext)
-                return true
+                true
             }
             "close" -> {
                 close(callbackContext)
-                return true
+                true
             }
+            else -> false
         }
-        return false
     }
 
     private fun open(args: JSONArray, callbackContext: CallbackContext) {
