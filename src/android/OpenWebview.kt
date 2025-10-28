@@ -159,6 +159,8 @@ class OpenWebview : CordovaPlugin() {
 
     private fun buildWebViewOptions(options: String): OSIABWebViewOptions {
         return gson.fromJson(options, OpenWebviewInputArguments::class.java).let {
+            val androidOpts = it.android
+
             OSIABWebViewOptions(
                 it.showURL ?: true,
                 it.showToolbar ?: true,
@@ -169,9 +171,9 @@ class OpenWebview : CordovaPlugin() {
                 it.toolbarPosition ?: OSIABToolbarPosition.TOP,
                 it.leftToRight ?: false,
                 it.showNavigationButtons ?: true,
-                it.android.allowZoom ?: true,
-                it.android.hardwareBack ?: true,
-                it.android.pauseMedia ?: true,
+                androidOpts?.allowZoom ?: true,
+                androidOpts?.hardwareBack ?: true,
+                androidOpts?.pauseMedia ?: true,
                 it.customWebViewUserAgent
             )
         }
