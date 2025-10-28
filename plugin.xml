@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plugin
+    id="cordova-os-openwebview"
+    version="1.0.0"
+    xmlns="http://apache.org/cordova/ns/plugins"
+    xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <name>OpenWebview</name>
+    <description>Abre uma WebView interna fullscreen e faz callback para JS quando apanha um deeplink interno.</description>
+    <license>MIT</license>
+
+    <js-module src="www/openWebview.js" name="OpenWebview">
+        <clobbers target="cordova.plugins.openWebview" />
+    </js-module>
+
+    <platform name="android">
+        <config-file target="res/xml/config.xml" parent="/*">
+            <feature name="OpenWebview">
+                <param name="android-package" value="com.outsystems.plugins.openwebview.OpenWebview" />
+            </feature>
+        </config-file>
+
+        <source-file src="src/android/OpenWebview.kt"
+                     target-dir="app/src/main/java/com/outsystems/plugins/openwebview" />
+        <source-file src="src/android/OpenWebviewError.kt"
+                     target-dir="app/src/main/java/com/outsystems/plugins/openwebview" />
+        <source-file src="src/android/OpenWebviewInputArguments.kt"
+                     target-dir="app/src/main/java/com/outsystems/plugins/openwebview" />
+        <source-file src="src/android/OpenWebviewEventType.kt"
+                     target-dir="app/src/main/java/com/outsystems/plugins/openwebview" />
+
+        <framework src="io.ionic.libs:ioninappbrowser-android:1.6.0@aar" />
+        <framework src="androidx.browser:browser:1.8.0" />
+        <framework src="com.google.android.gms:play-services-auth:21.2.0" />
+        <framework src="com.google.android.gms:play-services-location:21.3.0" />
+        <framework src="org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4" />
+        <framework src="org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3" />
+        <framework src="androidx.appcompat:appcompat:1.7.0" />
+        <framework src="androidx.activity:activity-ktx:1.9.3" />
+        <framework src="androidx.constraintlayout:constraintlayout:2.2.0" />
+        <framework src="com.google.code.gson:gson:2.10.1" />
+    </platform>
+
+</plugin>
