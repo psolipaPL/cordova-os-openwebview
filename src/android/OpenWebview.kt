@@ -23,9 +23,12 @@ class OpenWebview : CordovaPlugin() {
     private var activeRouter: OSIABRouter<Boolean>? = null
     private val gson by lazy { Gson() }
 
+    private var defaultUserAgent: String? = null
+
     override fun initialize(cordova: CordovaInterface, webView: CordovaWebView) {
         super.initialize(cordova, webView)
         this.engine = OSIABEngine()
+        this.defaultUserAgent = webView.view.settings.userAgentString
     }
 
     override fun execute(
@@ -158,23 +161,29 @@ class OpenWebview : CordovaPlugin() {
     }
 
     private fun buildWebViewOptions(options: String): OSIABWebViewOptions {
-        return gson.fromJson(options, OpenWebviewInputArguments::class.java).let {
-            val androidOpts = it.android
+        return gson.fromJson(options, OpenWebviewInputArguments::class.java).let { parsed ->
+            val androidOpts = parsed.android
+
+            val uaToUse = if (!parsed.customWebViewUserAgent.isNullOrEmpty()) {
+                parsed.customWebViewUserAgent
+            } else {
+                defaultUserAgent ?: ""
+            }
 
             OSIABWebViewOptions(
-                it.showURL ?: true,
-                it.showToolbar ?: true,
-                it.clearCache ?: true,
-                it.clearSessionCache ?: true,
-                it.mediaPlaybackRequiresUserAction ?: false,
-                it.closeButtonText ?: "Close",
-                it.toolbarPosition ?: OSIABToolbarPosition.TOP,
-                it.leftToRight ?: false,
-                it.showNavigationButtons ?: true,
+                parsed.showURL ?: true,
+                parsed.showToolbar ?: true,
+                parsed.clearCache ?: false,
+                parsed.clearSessionCache ?: false,
+                parsed.mediaPlaybackRequiresUserAction ?: false,
+                parsed.closeButtonText ?: "Close",
+                parsed.toolbarPosition ?: OSIABToolbarPosition.TOP,
+                parsed.leftToRight ?: false,
+                parsed.showNavigationButtons ?: true,
                 androidOpts?.allowZoom ?: true,
                 androidOpts?.hardwareBack ?: true,
                 androidOpts?.pauseMedia ?: true,
-                it.customWebViewUserAgent
+                uaToUse
             )
         }
     }
